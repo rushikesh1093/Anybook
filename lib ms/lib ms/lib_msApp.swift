@@ -14,7 +14,7 @@ struct YourApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LoginScreen() // Start with LoginScreen
+            SplashScreen() // Start with LoginScreen
         }
     }
 }
