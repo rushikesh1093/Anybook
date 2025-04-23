@@ -18,6 +18,7 @@ struct LoginScreen: View {
     private let db = Firestore.firestore()
     private let accentColor = Color(red: 0.2, green: 0.4, blue: 0.6)
     private let buttonGradient = LinearGradient(gradient: Gradient(colors: [Color(red: 0.8, green: 0.4, blue: 0.2), Color(red: 0.9, green: 0.5, blue: 0.3)]), startPoint: .leading, endPoint: .trailing)
+    private let adminEmails = ["admin1@library.com", "admin2@library.com"]
 
     var body: some View {
         NavigationStack {
@@ -60,6 +61,7 @@ struct LoginScreen: View {
                         Picker("Role", selection: $selectedRole) {
                             Text("Member").tag("Member")
                             Text("Librarian").tag("Librarian")
+                            Text("Admin").tag("Admin")
                         }
                         .pickerStyle(MenuPickerStyle())
                         .padding()
@@ -121,7 +123,7 @@ struct LoginScreen: View {
 //                }
                 .fullScreenCover(isPresented: $navigateToMember) {
                     // Replace with MemberHomePage when implemented
-                    HomePage(role: "member")
+                    HomePage(role: "Member")
                 }
             }
             .overlay(
@@ -155,9 +157,11 @@ struct LoginScreen: View {
                 case AuthErrorCode.wrongPassword.rawValue:
                     errorMessage = "Incorrect password. Please try again or use 'Forgot Password'."
                 case AuthErrorCode.userNotFound.rawValue, AuthErrorCode.invalidEmail.rawValue:
-                    errorMessage = "No account found with this email. Please sign up."
+                    errorMessage = "No account found with this email. Please sign up or check admin account creation."
+                case AuthErrorCode.weakPassword.rawValue:
+                    errorMessage = "Password is too weak. Please use a stronger password."
                 default:
-                    errorMessage = error.localizedDescription
+                    errorMessage = "Login failed: \(error.localizedDescription)"
                 }
                 return
             }
@@ -180,17 +184,22 @@ struct LoginScreen: View {
                 
                 guard let document = document, document.exists, let data = document.data(),
                       let role = data["role"] as? String else {
-                    errorMessage = "User data or role not found."
-                    print("Firestore error: User data not found")
+                    errorMessage = "User data or role not found. Ensure admin account is created."
+                    print("Firestore error: User data not found for UID: \(user.uid)")
                     return
                 }
                 
-                print("Firestore role: \(role)")
+                print("Firestore role: \(role), data: \(data)")
                 
-                // Navigate based on Firestore role, not selectedRole
+                // Validate role and email for Admin
                 switch role {
                 case "Admin":
-                    navigateToAdmin = true
+                    print("Checking admin email: \(email.lowercased()) in \(adminEmails)")
+                    if adminEmails.contains(email.lowercased()) {
+                        navigateToAdmin = true
+                    } else {
+                        errorMessage = "Unauthorized: Only predefined admin accounts can select Admin role."
+                    }
                 case "Librarian":
                     if selectedRole == "Librarian" {
                         navigateToLibrarian = true
@@ -204,7 +213,7 @@ struct LoginScreen: View {
                         errorMessage = "Selected role does not match your account. Please select Member."
                     }
                 default:
-                    errorMessage = "Invalid role."
+                    errorMessage = "Invalid role: \(role)"
                 }
             }
         }
@@ -217,6 +226,7 @@ struct LoginScreen: View {
         ]
         
         for admin in adminAccounts {
+            print("Checking admin account: \(admin.email)")
             Auth.auth().fetchSignInMethods(forEmail: admin.email) { methods, error in
                 if let error = error {
                     print("Error checking admin email: \(error.localizedDescription)")
@@ -225,34 +235,69 @@ struct LoginScreen: View {
                 
                 if methods?.isEmpty ?? true {
                     // Admin account doesn't exist, create it
+                    print("Creating admin account: \(admin.email)")
                     Auth.auth().createUser(withEmail: admin.email, password: admin.password) { result, error in
-                        if let error = error {
-                            print("Error creating admin account: \(error.localizedDescription)")
+                        if let error = error as NSError? {
+                            print("Error creating admin account: \(error.localizedDescription), code: \(error.code)")
+                            if error.code == AuthErrorCode.emailAlreadyInUse.rawValue {
+                                // Account exists, try signing in to update Firestore
+                                Auth.auth().signIn(withEmail: admin.email, password: admin.password) { _, signInError in
+                                    if let signInError = signInError {
+                                        print("Failed to sign in existing admin: \(signInError.localizedDescription)")
+                                    } else {
+                                        saveAdminData(uid: Auth.auth().currentUser?.uid, admin: admin)
+                                    }
+                                }
+                            }
                             return
                         }
                         
-                        guard let user = result?.user else { return }
+                        guard let user = result?.user else {
+                            print("No user created for admin: \(admin.email)")
+                            return
+                        }
                         
-                        let userData: [String: Any] = [
-                            "name": admin.name,
-                            "email": admin.email,
-                            "role": "Admin",
-                            "userId": admin.userId,
-                            "joinedDate": Timestamp(date: Date()),
-                            "membershipPlan": "None",
-                            "membershipExpiryDate": NSNull(),
-                            "settings": ["notifications": true, "darkMode": false]
-                        ]
-                        
-                        db.collection("users").document(user.uid).setData(userData) { error in
-                            if let error = error {
-                                print("Error saving admin data: \(error.localizedDescription)")
-                            } else {
-                                print("Admin account created: \(admin.email)")
-                            }
+                        saveAdminData(uid: user.uid, admin: admin)
+                    }
+                } else {
+                    // Account exists, ensure Firestore data is correct
+                    print("Admin account exists: \(admin.email), updating Firestore")
+                    Auth.auth().signIn(withEmail: admin.email, password: admin.password) { _, error in
+                        if let error = error {
+                            print("Failed to sign in to update Firestore: \(error.localizedDescription)")
+                            return
+                        }
+                        if let uid = Auth.auth().currentUser?.uid {
+                            saveAdminData(uid: uid, admin: admin)
                         }
                     }
                 }
+            }
+        }
+    }
+    
+    private func saveAdminData(uid: String?, admin: (email: String, password: String, name: String, userId: String)) {
+        guard let uid = uid else {
+            print("No UID for admin: \(admin.email)")
+            return
+        }
+        
+        let userData: [String: Any] = [
+            "name": admin.name,
+            "email": admin.email,
+            "role": "Admin",
+            "userId": admin.userId,
+            "joinedDate": Timestamp(date: Date()),
+            "membershipPlan": "None",
+            "membershipExpiryDate": NSNull(),
+            "settings": ["notifications": true, "darkMode": false]
+        ]
+        
+        db.collection("users").document(uid).setData(userData) { error in
+            if let error = error {
+                print("Error saving admin data: \(error.localizedDescription)")
+            } else {
+                print("Admin account created/updated: \(admin.email), UID: \(uid)")
             }
         }
     }
