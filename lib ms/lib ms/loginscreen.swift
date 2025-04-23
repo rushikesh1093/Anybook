@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseCore
 import FirebaseAuth
+import FirebaseFirestore
 
 struct LoginScreen: View {
     @State private var email = ""
@@ -10,10 +11,16 @@ struct LoginScreen: View {
     @State private var showForgotPassword = false
     @State private var errorMessage = ""
     @State private var isLoading = false
-    @State private var isLoggedIn = false
+    @State private var navigateToAdmin = false
+    @State private var navigateToLibrarian = false
+    @State private var navigateToMember = false
+
+    private let db = Firestore.firestore()
+    private let accentColor = Color(red: 0.2, green: 0.4, blue: 0.6)
+    private let buttonGradient = LinearGradient(gradient: Gradient(colors: [Color(red: 0.8, green: 0.4, blue: 0.2), Color(red: 0.9, green: 0.5, blue: 0.3)]), startPoint: .leading, endPoint: .trailing)
 
     var body: some View {
-        NavigationStack { // Replaced NavigationView with NavigationStack for modern SwiftUI
+        NavigationStack {
             ZStack {
                 LinearGradient(gradient: Gradient(colors: [Color(red: 0.95, green: 0.92, blue: 0.88), Color(red: 0.9, green: 0.87, blue: 0.83)]), startPoint: .top, endPoint: .bottom)
                     .edgesIgnoringSafeArea(.all)
@@ -23,12 +30,12 @@ struct LoginScreen: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 100, height: 100)
-                        .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
+                        .foregroundColor(accentColor)
                         .padding(.top, 40)
                     
                     Text("Login")
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(accentColor)
                     
                     VStack(spacing: 15) {
                         TextField("Email", text: $email)
@@ -53,7 +60,6 @@ struct LoginScreen: View {
                         Picker("Role", selection: $selectedRole) {
                             Text("Member").tag("Member")
                             Text("Librarian").tag("Librarian")
-                            Text("Admin").tag("Admin")
                         }
                         .pickerStyle(MenuPickerStyle())
                         .padding()
@@ -74,36 +80,30 @@ struct LoginScreen: View {
                             .multilineTextAlignment(.center)
                     }
                     
-                    Button(action: {
-                        login()
-                    }) {
+                    Button(action: login) {
                         Text("Login")
                             .fontWeight(.medium)
                             .foregroundColor(.white)
                             .padding()
                             .frame(maxWidth: 200)
-                            .background(LinearGradient(gradient: Gradient(colors: [Color(red: 0.8, green: 0.4, blue: 0.2), Color(red: 0.9, green: 0.5, blue: 0.3)]), startPoint: .leading, endPoint: .trailing))
+                            .background(buttonGradient)
                             .cornerRadius(12)
                             .shadow(radius: 5)
                     }
                     .disabled(isLoading)
                     
-                    Button(action: {
-                        showSignUp = true
-                    }) {
+                    Button(action: { showSignUp = true }) {
                         Text("Sign Up")
-                            .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
+                            .foregroundColor(accentColor)
                             .underline()
                     }
                     .fullScreenCover(isPresented: $showSignUp) {
                         SignUpScreen()
                     }
                     
-                    Button(action: {
-                        showForgotPassword = true
-                    }) {
+                    Button(action: { showForgotPassword = true }) {
                         Text("Forgot Password?")
-                            .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
+                            .foregroundColor(accentColor)
                             .underline()
                     }
                     .fullScreenCover(isPresented: $showForgotPassword) {
@@ -113,8 +113,15 @@ struct LoginScreen: View {
                     Spacer()
                 }
                 .padding()
-                .navigationDestination(isPresented: $isLoggedIn) {
-                    HomePage(role: selectedRole)
+                .fullScreenCover(isPresented: $navigateToAdmin) {
+                    AdminHomePage()
+                }
+//                .fullScreenCover(isPresented: $navigateToLibrarian) {
+//                    LibrarianHomePage()
+//                }
+                .fullScreenCover(isPresented: $navigateToMember) {
+                    // Replace with MemberHomePage when implemented
+                    HomePage(role: "member")
                 }
             }
             .overlay(
@@ -122,14 +129,23 @@ struct LoginScreen: View {
                     .progressViewStyle(CircularProgressViewStyle())
                     .scaleEffect(1.5) : nil
             )
+            .onAppear {
+                createAdminAccounts()
+            }
         }
     }
     
     private func login() {
+        guard !email.isEmpty, !password.isEmpty else {
+            errorMessage = "Please enter email and password."
+            isLoading = false
+            return
+        }
+        
         isLoading = true
         errorMessage = ""
         
-        print("Attempting login with email: \(email), role: \(selectedRole)")
+        print("Attempting login with email: \(email), selected role: \(selectedRole)")
         
         Auth.auth().signIn(withEmail: email.lowercased(), password: password) { result, error in
             isLoading = false
@@ -143,12 +159,100 @@ struct LoginScreen: View {
                 default:
                     errorMessage = error.localizedDescription
                 }
-            } else if let user = Auth.auth().currentUser {
-                print("Login successful, user UID: \(user.uid)")
-                isLoggedIn = true
-            } else {
-                print("Unexpected error: No user found after login attempt")
+                return
+            }
+            
+            guard let user = result?.user else {
                 errorMessage = "Unexpected error: No user found after login."
+                print("Unexpected error: No user found")
+                return
+            }
+            
+            print("Login successful, user UID: \(user.uid)")
+            
+            // Check Firestore for user role
+            db.collection("users").document(user.uid).getDocument { document, error in
+                if let error = error {
+                    errorMessage = "Failed to fetch user data: \(error.localizedDescription)"
+                    print("Firestore error: \(errorMessage)")
+                    return
+                }
+                
+                guard let document = document, document.exists, let data = document.data(),
+                      let role = data["role"] as? String else {
+                    errorMessage = "User data or role not found."
+                    print("Firestore error: User data not found")
+                    return
+                }
+                
+                print("Firestore role: \(role)")
+                
+                // Navigate based on Firestore role, not selectedRole
+                switch role {
+                case "Admin":
+                    navigateToAdmin = true
+                case "Librarian":
+                    if selectedRole == "Librarian" {
+                        navigateToLibrarian = true
+                    } else {
+                        errorMessage = "Selected role does not match your account. Please select Librarian."
+                    }
+                case "Member":
+                    if selectedRole == "Member" {
+                        navigateToMember = true
+                    } else {
+                        errorMessage = "Selected role does not match your account. Please select Member."
+                    }
+                default:
+                    errorMessage = "Invalid role."
+                }
+            }
+        }
+    }
+    
+    private func createAdminAccounts() {
+        let adminAccounts = [
+            (email: "admin1@library.com", password: "Admin123!", name: "Admin One", userId: "100001"),
+            (email: "admin2@library.com", password: "Admin456!", name: "Admin Two", userId: "100002")
+        ]
+        
+        for admin in adminAccounts {
+            Auth.auth().fetchSignInMethods(forEmail: admin.email) { methods, error in
+                if let error = error {
+                    print("Error checking admin email: \(error.localizedDescription)")
+                    return
+                }
+                
+                if methods?.isEmpty ?? true {
+                    // Admin account doesn't exist, create it
+                    Auth.auth().createUser(withEmail: admin.email, password: admin.password) { result, error in
+                        if let error = error {
+                            print("Error creating admin account: \(error.localizedDescription)")
+                            return
+                        }
+                        
+                        guard let user = result?.user else { return }
+                        
+                        let userData: [String: Any] = [
+                            "name": admin.name,
+                            "email": admin.email,
+                            "role": "Admin",
+                            "userId": admin.userId,
+                            "joinedDate": Timestamp(date: Date()),
+                            "membershipPlan": "None",
+                            "membershipExpiryDate": NSNull(),
+                            "settings": ["notifications": true, "darkMode": false]
+                        ]
+                        
+                        db.collection("users").document(user.uid).setData(userData) { error in
+                            if let error = error {
+                                print("Error saving admin data: \(error.localizedDescription)")
+                            } else {
+                                print("Admin account created: \(admin.email)")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -174,7 +278,7 @@ struct ForgotPasswordScreen: View {
                     .padding(.top, 40)
                 
                 Text("Forgot Password")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
                 
                 VStack(spacing: 15) {
@@ -197,9 +301,7 @@ struct ForgotPasswordScreen: View {
                         .padding(.horizontal)
                 }
                 
-                Button(action: {
-                    resetPassword()
-                }) {
+                Button(action: resetPassword) {
                     Text("Reset Password")
                         .fontWeight(.medium)
                         .foregroundColor(.white)
@@ -211,9 +313,7 @@ struct ForgotPasswordScreen: View {
                 }
                 .disabled(isLoading)
                 
-                Button(action: {
-                    showLogin = true
-                }) {
+                Button(action: { showLogin = true }) {
                     Text("Back to Login")
                         .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.6))
                         .underline()
@@ -225,12 +325,12 @@ struct ForgotPasswordScreen: View {
                 Spacer()
             }
             .padding()
+            .overlay(
+                isLoading ? ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle())
+                    .scaleEffect(1.5) : nil
+            )
         }
-        .overlay(
-            isLoading ? ProgressView()
-                .progressViewStyle(CircularProgressViewStyle())
-                .scaleEffect(1.5) : nil
-        )
     }
     
     private func resetPassword() {

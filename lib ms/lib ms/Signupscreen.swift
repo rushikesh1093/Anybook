@@ -3,7 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct SignUpScreen: View {
-    @State private var username = ""
+    @State private var name = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -82,9 +82,9 @@ struct SignUpScreen: View {
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundColor(accentColor.opacity(0.7))
-                        TextField("Username", text: $username)
+                        TextField("Name", text: $name)
                             .font(.system(size: 16, design: .rounded))
-                            .textInputAutocapitalization(.none)
+                            .textInputAutocapitalization(.words)
                             .padding(.vertical, 12)
                     }
                     .padding(.horizontal)
@@ -92,7 +92,7 @@ struct SignUpScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(username.isEmpty ? Color.gray.opacity(0.3) : (username.count >= 3 ? Color.green : Color.red), lineWidth: 1.5)
+                            .stroke(name.isEmpty ? Color.gray.opacity(0.3) : (name.count >= 3 ? Color.green : Color.red), lineWidth: 1.5)
                     )
                     
                     HStack {
@@ -209,12 +209,12 @@ struct SignUpScreen: View {
     }
     
     private func validateInputs() -> Bool {
-        guard !username.isEmpty, !email.isEmpty, !password.isEmpty, !confirmPassword.isEmpty else {
+        guard !name.isEmpty, !email.isEmpty, !password.isEmpty, !confirmPassword.isEmpty else {
             errorMessage = "All fields are required."
             return false
         }
-        guard username.count >= 3 else {
-            errorMessage = "Username must be at least 3 characters long."
+        guard name.count >= 3 else {
+            errorMessage = "Name must be at least 3 characters long."
             return false
         }
         guard email.contains("@") && email.contains(".") else {
@@ -233,63 +233,63 @@ struct SignUpScreen: View {
         return true
     }
     
+    private func generateRandomUserId() async throws -> String {
+        let randomId = String(format: "%06d", Int.random(in: 100000...999999))
+        
+        // Check if userId exists in Firestore
+        let query = db.collection("users").whereField("userId", isEqualTo: randomId)
+        let snapshot = try await query.getDocuments()
+        
+        if snapshot.isEmpty {
+            return randomId
+        } else {
+            // Recursively try again if ID is taken (rare)
+            return try await generateRandomUserId()
+        }
+    }
+    
     private func signUp() {
         isLoading = true
         errorMessage = ""
         
         let lowercaseEmail = email.lowercased()
         
-        Auth.auth().createUser(withEmail: lowercaseEmail, password: password) { result, error in
-            if let error = error as NSError? {
-                isLoading = false
-                switch error.code {
-                case AuthErrorCode.emailAlreadyInUse.rawValue:
-                    errorMessage = "This email is already in use. Please log in or use a different email."
-                case AuthErrorCode.invalidEmail.rawValue:
-                    errorMessage = "Invalid email format. Please enter a valid email."
-                case AuthErrorCode.weakPassword.rawValue:
-                    errorMessage = "Password is too weak. Please use at least 6 characters."
-                default:
-                    errorMessage = error.localizedDescription
-                }
-                print("Sign-up error: \(errorMessage)")
-                return
-            }
-            
-            guard let user = result?.user else {
-                isLoading = false
-                errorMessage = "Unexpected error: No user created."
-                print("Sign-up error: No user created")
-                return
-            }
-            
-            // Send email verification
-            user.sendEmailVerification { error in
-                if let error = error {
-                    errorMessage = "Failed to send verification email: \(error.localizedDescription)"
-                    isLoading = false
-                    print("Verification email error: \(errorMessage)")
-                    return
-                }
+        Task {
+            do {
+                // Generate unique 6-digit userId
+                let userId = try await generateRandomUserId()
+                
+                // Create user in Firebase Auth
+                let authResult = try await Auth.auth().createUser(withEmail: lowercaseEmail, password: password)
+                let user = authResult.user
+                
+                // Send email verification
+                try await user.sendEmailVerification()
                 
                 // Save user data to Firestore
                 let userData: [String: Any] = [
-                    "username": username.trimmingCharacters(in: .whitespacesAndNewlines),
+                    "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
                     "email": lowercaseEmail,
-                    "role": selectedRole
+                    "role": selectedRole,
+                    "userId": userId,
+                    "joinedDate": Timestamp(date: Date()),
+                    "membershipPlan": "None",
+                    "membershipExpiryDate": NSNull(),
+                    "settings": [
+                        "notifications": true,
+                        "darkMode": false
+                    ]
                 ]
                 
-                db.collection("users").document(user.uid).setData(userData) { error in
-                    isLoading = false
-                    if let error = error {
-                        errorMessage = "Failed to save user data: \(error.localizedDescription)"
-                        print("Firestore error: \(errorMessage)")
-                    } else {
-                        print("User data saved successfully for UID: \(user.uid), role: \(selectedRole)")
-                        showConfirmation = true
-                    }
-                }
+                try await db.collection("users").document(user.uid).setData(userData)
+                
+                print("User data saved successfully for UID: \(user.uid), role: \(selectedRole), userId: \(userId)")
+                showConfirmation = true
+            } catch {
+                errorMessage = error.localizedDescription
+                print("Sign-up error: \(errorMessage)")
             }
+            isLoading = false
         }
     }
 }

@@ -5,7 +5,7 @@ import FirebaseFirestore
 struct ProfileTabView: View {
     let role: String
     let logoutAction: () -> Void
-    @State private var username = "Loading..."
+    @State private var name = "Loading..."
     @State private var userId = ""
     @State private var joinedDate: Date? = nil
     @State private var membershipExpiryDate: Date? = nil
@@ -35,7 +35,7 @@ struct ProfileTabView: View {
                             .frame(width: 80, height: 80)
                             .foregroundColor(accentColor)
                         
-                        Text(username)
+                        Text(name)
                             .font(.system(.title2, design: .rounded, weight: .bold))
                             .foregroundColor(accentColor)
                         
@@ -200,7 +200,6 @@ struct ProfileTabView: View {
         }
         
         isLoading = true
-        userId = user.uid
         joinedDate = user.metadata.creationDate
         
         db.collection("users").document(user.uid).getDocument { document, error in
@@ -217,7 +216,8 @@ struct ProfileTabView: View {
                 return
             }
             
-            username = data["username"] as? String ?? "Unknown"
+            name = data["name"] as? String ?? "Unknown"
+            userId = data["userId"] as? String ?? "N/A"
             membershipPlan = data["membershipPlan"] as? String ?? "None"
             if let expiryTimestamp = data["membershipExpiryDate"] as? Timestamp {
                 membershipExpiryDate = expiryTimestamp.dateValue()
@@ -254,6 +254,11 @@ struct ProfileTabView: View {
                 membershipExpiryDate = expiryDate
                 errorMessage = ""
                 print("Membership updated to \(plan) months, expires \(expiryDate.formatted())")
+                
+                // TODO: Implement Librarian approval request
+                // - Create a Firestore collection (e.g., "membershipRequests")
+                // - Store request details: userId, name, plan, requestDate, status ("pending")
+                // - Notify Librarian (e.g., via a separate view or push notification)
             }
         }
     }
