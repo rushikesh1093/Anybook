@@ -486,7 +486,7 @@ struct AddBookView: View {
                 newBook.author = self.author
                 newBook.genre = self.selectedGenre
                 newBook.isbn = self.isbn
-                newBook.bookDescription = self.description.isEmpty ? nil : self.description
+                newBook.bookDescription = self.description.isEmpty ? "nil" : self.description
                 newBook.status = "available"
                 newBook.createdAt = Date()
                 newBook.isFavorite = false
@@ -563,7 +563,7 @@ struct EditBookView: View {
         _selectedGenre = State(initialValue: book.genre)
         _isbn = State(initialValue: book.isbn)
         _description = State(initialValue: book.description)
-        if let uiImage = UIImage(data: book.coverImage) {
+        if let uiImage = UIImage(data: book.coverImage!) {
             _image = State(initialValue: uiImage)
         }
     }
@@ -752,7 +752,7 @@ struct EditBookView: View {
                 self.book.author = self.author
                 self.book.genre = self.selectedGenre
                 self.book.isbn = self.isbn
-                self.book.bookDescription = self.description.isEmpty ? nil : self.description
+                self.book.bookDescription = self.description.isEmpty ? "nil" : self.description
                 
                 // Handle cover image safely
                 if let image = self.image, let imageData = image.jpegData(compressionQuality: 0.5) {

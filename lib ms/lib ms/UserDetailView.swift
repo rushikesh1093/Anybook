@@ -1,7 +1,14 @@
+//
+//  UserDetailView.swift
+//  lib ms
+//
+//  Created by [Your Name] on [Date]
+//
+
 import SwiftUI
 
 struct UserDetailView: View {
-    let user: (id: String, name: String, role: String, email: String, dateJoined: String)
+    let user: (id: String, name: String, role: String, email: String, personalEmail: String, govtDocNumber: String, dateJoined: String)
 
     var body: some View {
         VStack(spacing: 20) {
@@ -22,26 +29,67 @@ struct UserDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.black)
 
-            // Email
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Email")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.gray)
-                Text(user.email)
-                    .font(.system(size: 16))
-                    .foregroundColor(.black)
+            // Conditional Fields for Librarian
+            if user.role == "Librarian" {
+                // Personal Email
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Personal Email")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(user.personalEmail)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+
+                // Government ID
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Government ID")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(user.govtDocNumber)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+
+                // Official Email
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Official Email")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(user.email)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+            } else {
+                // Email for non-Librarian roles
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Email")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(user.email)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
 
             // Date Joined
             VStack(alignment: .leading, spacing: 5) {
                 Text("Date Joined")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundColor(.gray)
                 Text(user.dateJoined)
-                    .font(.system(size: 16))
+                    .font(.system(size: 18))
                     .foregroundColor(.black)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
 
             Spacer()
@@ -55,7 +103,7 @@ struct UserDetailView: View {
 struct UserDetailView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            UserDetailView(user: ("001", "John Doe", "Librarian", "john@example.com", "2023-01-15"))
+            UserDetailView(user: ("001", "John Doe", "Librarian", "johndoe@anybook.com", "john@example.com", "123456789012", "2023-01-15"))
         }
     }
 }

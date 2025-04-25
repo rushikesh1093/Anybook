@@ -1,5 +1,13 @@
+//
+//  AddLibrarianView.swift
+//  lib ms
+//
+//  Created by admin12 on 25/04/25.
+//
+
 import SwiftUI
 import FirebaseFirestore
+import FirebaseAuth
 
 struct AddLibrarianView: View {
     @Environment(\.dismiss) var dismiss
@@ -7,7 +15,9 @@ struct AddLibrarianView: View {
     @State private var personalEmail = ""
     @State private var govtDocNumber = ""
     @State private var errorMessage = ""
-    var onSave: ((id: String, name: String, role: String, email: String, dateJoined: String)) -> Void
+    @State private var isAdminSignedIn = false
+    @State private var adminUid: String? // Store admin UID to restore after creating new user
+    var onSave: ((id: String, name: String, role: String, email: String, personalEmail: String, govtDocNumber: String, dateJoined: String)) -> Void
     private let db = Firestore.firestore()
 
     // Regex pattern for Aadhaar (12 digits)
@@ -82,16 +92,36 @@ struct AddLibrarianView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 20)
+                .disabled(!isAdminSignedIn) // Disable until admin is signed in
             }
             .background(Color.white)
             .navigationBarItems(leading: Button("Cancel") {
                 dismiss()
             })
+            .onAppear {
+                signInAdmin()
+            }
+        }
+    }
+
+    private func signInAdmin() {
+        let adminEmail = "admin@anybook.com"
+        let adminPassword = "Admin@2025!"
+
+        Auth.auth().signIn(withEmail: adminEmail, password: adminPassword) { result, error in
+            if let error = error {
+                errorMessage = "Admin login failed: \(error.localizedDescription)"
+                print("Admin sign-in error: \(error.localizedDescription)")
+                isAdminSignedIn = false
+                return
+            }
+            isAdminSignedIn = true
+            adminUid = result?.user.uid
+            print("Admin signed in successfully, UID: \(result?.user.uid ?? "unknown")")
         }
     }
 
     private func saveLibrarian() {
-        // Validate inputs
         guard !name.isEmpty, !personalEmail.isEmpty, !govtDocNumber.isEmpty else {
             errorMessage = "All fields are required."
             return
@@ -100,45 +130,100 @@ struct AddLibrarianView: View {
             errorMessage = "Please enter a valid email address."
             return
         }
-        // Validate Aadhaar number (12 digits)
         guard govtDocNumber.range(of: aadhaarPattern, options: .regularExpression) != nil else {
             errorMessage = "Please enter a valid 12-digit Aadhaar number."
             return
         }
 
-        // Generate email and password
         let generatedEmail = generateEmail(from: name)
         let generatedPassword = generateStrongPassword()
+        print("Generated credentials: Email: \(generatedEmail), Password: \(generatedPassword)")
 
-        // Prepare user data
-        let userId = UUID().uuidString
-        let dateJoined = formattedDate()
-        let newUser = (id: userId, name: name, role: "Librarian", email: generatedEmail, dateJoined: dateJoined)
-
-        // Save to Firestore
-        let userData: [String: Any] = [
-            "userId": userId,
-            "name": name,
-            "role": "Librarian",
-            "email": generatedEmail,
-            "password": generatedPassword,
-            "personalEmail": personalEmail,
-            "govtDocNumber": govtDocNumber,
-            "dateJoined": dateJoined
-        ]
-
-        db.collection("users").document(userId).setData(userData) { error in
-            if let error = error {
-                errorMessage = "Failed to save librarian: \(error.localizedDescription)"
+        generateUniqueSixDigitUserId { userId in
+            guard let userId = userId else {
+                errorMessage = "Failed to generate a unique ID. Please try again."
                 return
             }
 
-            // Send email with credentials (simulated API call)
-            sendCredentialsEmail(to: personalEmail, generatedEmail: generatedEmail, password: generatedPassword)
+            Auth.auth().createUser(withEmail: generatedEmail, password: generatedPassword) { authResult, error in
+                if let error = error {
+                    errorMessage = "Failed to create user in Authentication: \(error.localizedDescription)"
+                    print("Authentication error: \(error.localizedDescription)")
+                    return
+                }
+                guard let newUserUid = authResult?.user.uid else {
+                    errorMessage = "Failed to retrieve new user UID."
+                    return
+                }
+                print("New user created with UID: \(newUserUid)")
 
-            // Update local users list and dismiss
-            onSave(newUser)
-            dismiss()
+                // Store the new user data
+                let dateJoined = formattedDate()
+                let newUser = (id: userId, name: name, role: "Librarian", email: generatedEmail, personalEmail: personalEmail, govtDocNumber: govtDocNumber, dateJoined: dateJoined)
+
+                let userData: [String: Any] = [
+                    "userId": userId,
+                    "name": name,
+                    "role": "Librarian",
+                    "email": generatedEmail,
+                    "authUid": newUserUid,
+                    "personalEmail": personalEmail,
+                    "govtDocNumber": govtDocNumber,
+                    "dateJoined": dateJoined
+                ]
+
+                // Save to Firestore
+                db.collection("users").document(userId).setData(userData) { error in
+                    if let error = error {
+                        errorMessage = "Failed to save librarian: \(error.localizedDescription)"
+                        print("Firestore error: \(error.localizedDescription)")
+                        return
+                    }
+
+                    // Log credentials for testing
+                    print("Credentials for login: Email: \(generatedEmail), Password: \(generatedPassword)")
+
+                    // Call onSave with the new user tuple
+                    onSave(newUser)
+
+                    // Attempt to sign in with the new credentials to verify
+                    Auth.auth().signIn(withEmail: generatedEmail, password: generatedPassword) { signInResult, signInError in
+                        if let signInError = signInError {
+                            print("Verification login failed: \(signInError.localizedDescription)")
+                            errorMessage = "Created user, but verification login failed: \(signInError.localizedDescription)"
+                            return
+                        }
+                        print("Verification login successful for \(generatedEmail), UID: \(signInResult?.user.uid ?? "unknown")")
+
+                        // Restore admin session
+                        Auth.auth().signIn(withEmail: "admin@anybook.com", password: "Admin@2025!") { _, error in
+                            if let error = error {
+                                errorMessage = "Failed to restore admin session: \(error.localizedDescription)"
+                                print("Failed to restore admin session: \(error.localizedDescription)")
+                                return
+                            }
+                            print("Admin session restored.")
+                            dismiss()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func generateUniqueSixDigitUserId(completion: @escaping (String?) -> Void) {
+        var newId = String(format: "%06d", Int.random(in: 100000...999999))
+        db.collection("users").whereField("userId", isEqualTo: newId).getDocuments { snapshot, error in
+            if let error = error {
+                print("Error checking userId: \(error.localizedDescription)")
+                completion(nil)
+                return
+            }
+            if let snapshot = snapshot, !snapshot.isEmpty {
+                generateUniqueSixDigitUserId(completion: completion)
+            } else {
+                completion(newId)
+            }
         }
     }
 
@@ -154,14 +239,13 @@ struct AddLibrarianView: View {
         let allChars = letters + numbers + special
 
         var password = ""
-        password += String(letters.randomElement()!).uppercased() // At least one uppercase letter
-        password += String(letters.randomElement()!) // At least one lowercase letter
-        password += String(numbers.randomElement()!) // At least one number
-        password += String(special.randomElement()!) // At least one special character
+        password += String((letters.randomElement() ?? "A").uppercased()) // At least one uppercase letter
+        password += String(letters.randomElement() ?? "a") // At least one lowercase letter
+        password += String(numbers.randomElement() ?? "0") // At least one number
+        password += String(special.randomElement() ?? "!") // At least one special character
 
-        // Fill the rest to make it 12 characters long
         for _ in 0..<8 {
-            password += String(allChars.randomElement()!)
+            password += String(allChars.randomElement() ?? "x")
         }
 
         return String(password.shuffled())
@@ -174,32 +258,9 @@ struct AddLibrarianView: View {
     }
 
     private func sendCredentialsEmail(to email: String, generatedEmail: String, password: String) {
-        // Simulated API call to send email
         print("Sending email to \(email) with credentials:")
         print("Email: \(generatedEmail)")
         print("Password: \(password)")
-
-        // In a real app, you would call a backend API here to send the email.
-        // Example using URLSession (requires a backend server):
-        /*
-        let url = URL(string: "https://your-backend-api/send-email")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
-            "to": email,
-            "subject": "Your Librarian Account Credentials",
-            "body": "Your login credentials:\nEmail: \(generatedEmail)\nPassword: \(password)"
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("Failed to send email: \(error.localizedDescription)")
-            } else {
-                print("Email sent successfully")
-            }
-        }.resume()
-        */
     }
 }
 
