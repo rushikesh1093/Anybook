@@ -18,7 +18,7 @@ struct LoginScreen: View {
     private let db = Firestore.firestore()
     private let accentColor = Color(red: 0.2, green: 0.4, blue: 0.6)
     private let buttonGradient = LinearGradient(gradient: Gradient(colors: [Color(red: 0.8, green: 0.4, blue: 0.2), Color(red: 0.9, green: 0.5, blue: 0.3)]), startPoint: .leading, endPoint: .trailing)
-    private let adminEmails = ["admin1@library.com", "admin2@library.com"]
+    private let adminEmails = ["admin1@library.com", "admin2@library.com", "admin@anybook.com"]
 
     var body: some View {
         NavigationStack {
@@ -220,9 +220,10 @@ struct LoginScreen: View {
     }
     
     private func createAdminAccounts() {
-        let adminAccounts = [
-            (email: "admin1@library.com", password: "Admin123!", name: "Admin One", userId: "100001"),
-            (email: "admin2@library.com", password: "Admin456!", name: "Admin Two", userId: "100002")
+        let adminAccounts: [(email: String, password: String, name: String, userId: String, dateJoined: String?)] = [
+            (email: "admin1@library.com", password: "Admin123!", name: "Admin One", userId: "100001", dateJoined: nil),
+            (email: "admin2@library.com", password: "Admin456!", name: "Admin Two", userId: "100002", dateJoined: nil),
+            (email: "admin@anybook.com", password: "Admin@2025!", name: "Admin User", userId: "adminCustomId", dateJoined: "2025-04-25")
         ]
         
         for admin in adminAccounts {
@@ -276,18 +277,18 @@ struct LoginScreen: View {
         }
     }
     
-    private func saveAdminData(uid: String?, admin: (email: String, password: String, name: String, userId: String)) {
+    private func saveAdminData(uid: String?, admin: (email: String, password: String, name: String, userId: String, dateJoined: String?)) {
         guard let uid = uid else {
             print("No UID for admin: \(admin.email)")
             return
         }
         
-        let userData: [String: Any] = [
+        var userData: [String: Any] = [
             "name": admin.name,
             "email": admin.email,
             "role": "Admin",
             "userId": admin.userId,
-            "joinedDate": Timestamp(date: Date()),
+            "joinedDate": admin.dateJoined != nil ? Timestamp(date: dateFormatter.date(from: admin.dateJoined!) ?? Date()) : Timestamp(date: Date()),
             "membershipPlan": "None",
             "membershipExpiryDate": NSNull(),
             "settings": ["notifications": true, "darkMode": false]
@@ -300,6 +301,12 @@ struct LoginScreen: View {
                 print("Admin account created/updated: \(admin.email), UID: \(uid)")
             }
         }
+    }
+    
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
     }
 }
 
